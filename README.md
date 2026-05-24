@@ -1,4 +1,7 @@
-CHIP STUDIO v4 PRO · 50 Chips
+CHIP STUDIO v4 PRO
+![CHIP STUDIO v4 PRO](Screenshot_20260524-121504.jpg)
+
+ · 50 Chips
 Tracker chiptune 100% web, inspirado no Game Boy, com 50 emulações de chips clássicos.
 
 Um DAW de bolso que roda no navegador (mobile-first) para compor música 8-bit/16-bit no estilo NES, C64, Game Boy, Mega Drive, Arcade e mais. Sem instalação, sem servidor — só HTML + Web Audio.
