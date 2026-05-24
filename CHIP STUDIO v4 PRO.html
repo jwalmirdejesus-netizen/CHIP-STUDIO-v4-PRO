@@ -1,0 +1,1451 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<!-- Playables SDK -->
+<script>// Playables SDK v1.0.0
+// Game lifecycle bridge: rAF-based game-ready detection + event communication
+(function() {
+  'use strict';
+
+  // Idempotency: skip if already initialized (e.g., server-side injection
+  // followed by client-side inject-javascript via the Bloks webview component).
+  if (window.playablesSDK) return;
+
+  var HANDLER_NAME = 'playablesGameEventHandler';
+  var ANDROID_BRIDGE_NAME = '_MetaPlayablesBridge';
+  var RAF_FRAME_THRESHOLD = 3;
+
+  var gameReadySent = false;
+  var firstInteractionSent = false;
+  var errorSent = false;
+  var frameCount = 0;
+  var originalRAF = window.requestAnimationFrame;
+
+  // --- Transport Layer ---
+
+  function hasIOSBridge() {
+    return !!(window.webkit &&
+              window.webkit.messageHandlers &&
+              window.webkit.messageHandlers[HANDLER_NAME]);
+  }
+
+  function hasAndroidBridge() {
+    return !!(window[ANDROID_BRIDGE_NAME] &&
+              typeof window[ANDROID_BRIDGE_NAME].postEvent === 'function');
+  }
+
+  function isInIframe() {
+    return !!(window.parent && window.parent !== window);
+  }
+
+  function sendEvent(eventName, payload) {
+    var message = {
+      type: eventName,
+      payload: payload || {},
+      timestamp: Date.now()
+    };
+
+    if (hasIOSBridge()) {
+      try {
+        window.webkit.messageHandlers[HANDLER_NAME].postMessage(message);
+      } catch (e) { /* ignore */ }
+      return;
+    }
+
+    if (hasAndroidBridge()) {
+    try {
+      var p = payload || {};
+      p.__secureToken = window.__fbAndroidBridgeAuthToken || '';
+      p.timestamp = message.timestamp;
+      window[ANDROID_BRIDGE_NAME].postEvent(
+        eventName,
+        JSON.stringify(p)
+      );
+    } catch (e) { /* ignore */ }
+    return;
+  }
+
+    if (isInIframe()) {
+      try {
+        window.parent.postMessage(message, '*');
+      } catch (e) { /* ignore */ }
+      return;
+    }
+  }
+
+  // --- rAF Game-Ready Detection ---
+
+  function onFrame() {
+    if (gameReadySent) return;
+
+    frameCount++;
+    if (frameCount >= RAF_FRAME_THRESHOLD) {
+      gameReadySent = true;
+      sendEvent('game_ready', {
+        frame_count: frameCount,
+        detected_at: Date.now()
+      });
+      return;
+    }
+
+    originalRAF.call(window, onFrame);
+  }
+
+  if (originalRAF) {
+    window.requestAnimationFrame = function(callback) {
+      if (!gameReadySent) {
+        return originalRAF.call(window, function(timestamp) {
+          frameCount++;
+          if (frameCount >= RAF_FRAME_THRESHOLD && !gameReadySent) {
+            gameReadySent = true;
+            sendEvent('game_ready', {
+              frame_count: frameCount,
+              detected_at: Date.now()
+            });
+          }
+          callback(timestamp);
+        });
+      }
+      return originalRAF.call(window, callback);
+    };
+  }
+
+  // --- First User Interaction Detection ---
+
+  function setupFirstInteractionDetection() {
+    var events = ['touchstart', 'mousedown', 'keydown'];
+
+    function onFirstInteraction() {
+      if (firstInteractionSent) return;
+      firstInteractionSent = true;
+      sendEvent('user_interaction_start', null);
+
+      for (var i = 0; i < events.length; i++) {
+        document.removeEventListener(events[i], onFirstInteraction, true);
+      }
+    }
+
+    for (var i = 0; i < events.length; i++) {
+      document.addEventListener(events[i], onFirstInteraction, true);
+    }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupFirstInteractionDetection);
+  } else {
+    setupFirstInteractionDetection();
+  }
+
+  // --- Auto Error Capture ---
+
+  window.addEventListener('error', function(event) {
+    if (errorSent) return;
+    errorSent = true;
+    sendEvent('error', {
+      message: event.message || 'Unknown error',
+      source: event.filename || '',
+      lineno: event.lineno || 0,
+      colno: event.colno || 0,
+      auto_captured: true
+    });
+  });
+
+  window.addEventListener('unhandledrejection', function(event) {
+    if (errorSent) return;
+    errorSent = true;
+    var reason = event.reason;
+    sendEvent('error', {
+      message: (reason instanceof Error) ? reason.message : String(reason),
+      type: 'unhandled_promise_rejection',
+      auto_captured: true
+    });
+  });
+
+  // --- Public API ---
+
+  window.playablesSDK = {
+    complete: function(score) {
+      sendEvent('game_ended', {
+        score: score,
+        completed: true
+      });
+    },
+
+    error: function(message) {
+      if (errorSent) return;
+      errorSent = true;
+      sendEvent('error', {
+        message: message || 'Unknown error',
+        auto_captured: false
+      });
+    },
+
+    sendEvent: function(eventName, payload) {
+      if (!eventName || typeof eventName !== 'string') return;
+      sendEvent(eventName, payload);
+    }
+  };
+
+  // Kick off rAF detection in case no game code calls rAF immediately
+  if (originalRAF) {
+    originalRAF.call(window, onFrame);
+  }
+})();</script>
+<!-- PLAYABLE_TOUCH_PATCH_V1 --><script>
+(function() {
+  if (window.__playableTouchPatchInstalled) return;
+  window.__playableTouchPatchInstalled = true;
+  var origAdd = EventTarget.prototype.addEventListener;
+  var blockedTypes = { touchstart: 1, touchmove: 1, wheel: 1 };
+  EventTarget.prototype.addEventListener = function(type, listener, options) {
+    if (blockedTypes[type]) {
+      if (options === undefined || options === null) {
+        options = { passive: true };
+      } else if (typeof options === 'boolean') {
+        options = { capture: options, passive: true };
+      } else {
+        options = Object.assign({}, options, { passive: true });
+      }
+    }
+    return origAdd.call(this, type, listener, options);
+  };
+})();
+</script><script>window.Intl=window.Intl||{};Intl.t=function(s){return(Intl._locale&&Intl._locale[s])||s;};</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>CHIP STUDIO v4 PRO · 50 Chips</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap');
+:root{
+  --gb-0:#0f380f;
+  --gb-1:#306230;
+  --gb-2:#8bac0f;
+  --gb-3:#9bbc0f;
+  --shell:#2d332d;
+  --shell-dark:#1b221b;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{
+  margin:0;background:radial-gradient(ellipse at top,#0e1a0e,#050805);
+  color:var(--gb-3);font-family:'VT323',monospace;
+  display:flex;align-items:flex-start;justify-content:center;padding:12px
+}
+.shell{
+  width:100%;max-width:480px;background:linear-gradient(145deg,#3a433a,#262d26);
+  border-radius:28px;padding:16px 14px 24px;
+  box-shadow:0 0 0 3px #0a0f0a,0 0 0 6px #151b15,0 12px 30px rgba(0,0,0,.85),inset 0 2px 0 rgba(255,255,255,.05);
+  border:2px solid #0c110c;position:relative
+}
+.banner{
+  background:var(--gb-0);color:var(--gb-3);font-family:'Press Start 2P',monospace;
+  font-size:7.5px;padding:6px 8px;text-align:center;border-radius:6px;margin-bottom:10px;
+  letter-spacing:.5px;box-shadow:inset 0 -2px 0 rgba(0,0,0,.4);border:1px solid #050805
+}
+.header{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
+.logo{font-family:'Press Start 2P',monospace;font-size:14px;color:#c8e08b;text-shadow:0 2px 0 #000;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.logo span{font-size:9px;color:var(--gb-2);background:var(--gb-0);padding:2px 5px;border-radius:3px}
+.transport{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.btn-imp,.btn-play,.btn-stop{
+  background:var(--shell-dark);color:var(--gb-3);border:2px solid #000;
+  font-family:'Press Start 2P';font-size:9px;padding:8px 10px;border-radius:6px;
+  cursor:pointer;box-shadow:inset 0 -3px 0 rgba(0,0,0,.6),0 2px 0 #000;transition:.08s
+}
+.btn-imp{background:#3c4a3c}
+.btn-play{background:#1e3d1e}
+.btn-stop{background:#3d1e1e}
+.btn-imp:active,.btn-play:active,.btn-stop:active{transform:translateY(2px);box-shadow:inset 0 -1px 0 rgba(0,0,0,.6),0 0 0 #000}
+.bpm{display:flex;align-items:center;gap:6px;background:var(--shell-dark);padding:4px 8px;border-radius:6px;border:2px solid #000;font-size:14px}
+.bpm input{width:56px;background:var(--gb-0);color:var(--gb-3);border:1px solid #000;border-radius:4px;padding:2px 4px;font-family:'Press Start 2P';font-size:10px;text-align:center}
+.screen-bezel{background:#111611;padding:12px;border-radius:18px;box-shadow:inset 0 4px 12px rgba(0,0,0,.9),inset 0 -2px 0 rgba(255,255,255,.03);border:2px solid #0a0e0a}
+.screen{background:var(--gb-3);color:var(--gb-0);border-radius:6px;min-height:420px;padding:8px;box-shadow:inset 0 0 18px rgba(15,56,15,.25);position:relative;border:3px solid #0a140a}
+.tabs{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px}
+.tabs button{background:var(--gb-1);color:var(--gb-3);border:none;padding:6px 7px;font-family:'Press Start 2P';font-size:8px;border-radius:4px;cursor:pointer;opacity:.75;letter-spacing:.3px;box-shadow:inset 0 -2px 0 rgba(0,0,0,.3)}
+.tabs button.active{opacity:1;background:var(--gb-0);color:var(--gb-3);box-shadow:inset 0 2px 0 rgba(0,0,0,.5)}
+.tab-content{display:none}
+.tab-content.active{display:block;animation:fade .15s}
+@keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+.pattern-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;font-family:'Press Start 2P';font-size:8px}
+.pattern-tools button{background:var(--gb-1);border:1px solid var(--gb-0);color:var(--gb-0);padding:3px 5px;font-size:8px;font-family:'Press Start 2P';border-radius:3px;cursor:pointer}
+#patternGrid{height:340px;overflow:auto;background:rgba(0,0,0,.06);border:2px solid var(--gb-0);border-radius:4px}
+.grid-row{display:grid;grid-template-columns:32px repeat(5,1fr);gap:1px}
+.step-num{background:var(--gb-0);color:var(--gb-3);text-align:center;padding:5px 0;font-size:9px;font-family:'Press Start 2P'}
+.cell{background:var(--gb-2);color:var(--gb-0);text-align:center;padding:5px 2px;font-family:'Press Start 2P';font-size:9px;cursor:pointer;user-select:none;border-bottom:1px solid rgba(0,0,0,.15)}
+.cell:hover{filter:brightness(1.1)}
+.cell.active{outline:2px solid #ff0040;outline-offset:-2px;background:#c4dc6a;z-index:1}
+.cell.playing{background:var(--gb-0);color:var(--gb-3);box-shadow:inset 0 0 0 1px var(--gb-3)}
+#mixer{display:grid;gap:8px}
+.mix-ch{display:grid;grid-template-columns:70px 1fr 40px;align-items:center;gap:6px;background:rgba(0,0,0,.05);padding:6px;border-radius:4px;border:1px solid rgba(0,0,0,.1)}
+.mix-ch label{font-family:'Press Start 2P';font-size:8px}
+.mix-ch input[type=range]{width:100%;accent-color:var(--gb-0)}
+.mix-val{font-family:'Press Start 2P';font-size:9px;text-align:right}
+.instr-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px}
+.instr-grid label{font-size:9px;font-family:'Press Start 2P';display:flex;flex-direction:column;gap:3px}
+.instr-grid select,.wave-opts select{background:var(--gb-2);color:var(--gb-0);border:2px solid var(--gb-0);border-radius:4px;padding:4px;font-family:'VT323';font-size:16px}
+.adsr{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px}
+.adsr>div{background:rgba(0,0,0,.05);padding:6px;border-radius:4px;border:1px solid rgba(0,0,0,.1)}
+.adsr span{font-family:'Press Start 2P';font-size:8px;display:block;margin-bottom:3px}
+.adsr input{width:100%;accent-color:var(--gb-0)}
+.wave-opts{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.wave-opts label{font-family:'Press Start 2P';font-size:8px;display:flex;align-items:center;gap:4px}
+#waveCanvas{width:100%;height:110px;background:var(--gb-2);border:2px solid var(--gb-0);border-radius:4px;image-rendering:pixelated;cursor:crosshair;touch-action:none}
+.wave-tools{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
+.wave-tools button{background:var(--gb-1);color:var(--gb-0);border:1px solid var(--gb-0);font-family:'Press Start 2P';font-size:8px;padding:5px 6px;border-radius:3px;cursor:pointer}
+.wave-info{font-size:12px;margin-top:4px;opacity:.7}
+.chips-list{height:260px;overflow:auto;display:grid;grid-template-columns:1fr;gap:3px;font-size:15px}
+.chip-item{background:rgba(0,0,0,.05);padding:4px 6px;border-radius:3px;border-left:3px solid var(--gb-1)}
+.chip-item b{font-family:'Press Start 2P';font-size:8px;margin-right:6px;color:var(--gb-1)}
+.piano-wrap{margin-top:14px;display:flex;justify-content:center;overflow-x:auto;padding-bottom:6px;-webkit-overflow-scrolling:touch}
+.piano{display:flex;gap:3px;padding:10px;background:var(--shell-dark);border-radius:12px;border:2px solid #000;box-shadow:inset 0 3px 6px rgba(0,0,0,.6);transform-origin:center;flex-shrink:0}
+.key{width:38px;height:92px;background:var(--gb-3);border:2px solid var(--gb-0);border-radius:0 0 6px 6px;cursor:pointer;display:flex;align-items:flex-end;justify-content:center;padding-bottom:6px;font-size:10px;color:var(--gb-0);font-family:'Press Start 2P';user-select:none;box-shadow:inset 0 -5px 0 rgba(0,0,0,.25);touch-action:manipulation}
+.key:active,.key.active{background:var(--gb-2);transform:translateY(2px)}
+.key.black{width:26px;height:58px;background:var(--gb-0);color:var(--gb-3);margin:0 -13px;z-index:2;position:relative;border-color:#000;box-shadow:inset 0 -4px 0 #000;font-size:9px}
+.speaker{margin:18px auto 0;width:90%;display:grid;grid-template-columns:repeat(6,1fr);gap:8px;opacity:.15}
+.speaker div{height:6px;background:#000;border-radius:3px}
+#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%) translateY(20px);background:var(--gb-0);color:var(--gb-3);padding:8px 14px;border-radius:6px;font-family:'Press Start 2P';font-size:8px;opacity:0;pointer-events:none;transition:.2s;z-index:999;border:2px solid #000;max-width:90%;text-align:center}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+@media (max-width:480px){.piano{padding:8px}.key{width:34px;height:84px;font-size:9px}.key.black{width:24px;height:54px;margin:0 -12px}.logo{font-size:12px}.instr-grid{grid-template-columns:1fr}}
+@media (max-width:380px){.key{width:30px;height:76px;font-size:8px}.key.black{width:21px;height:48px;margin:0 -10.5px}}
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="banner">50 CHIPS · 15 CONSOLES · 120+ SAMPLES · NES/GB/C64/ATARI · PRODUÇÃO RÁPIDA</div>
+  <div class="header">
+    <div class="logo">CHIP STUDIO <span>v4 PRO</span></div>
+    <div class="transport">
+      <button id="importDmf" class="btn-imp">IMPORTAR DMF</button>
+      <input type="file" id="dmfFile" accept=".dmf,.dmp" hidden>
+      <button id="playBtn" class="btn-play">▶ TOCAR</button>
+            <button id="stopBtn" class="btn-stop">■ PARAR</button>
+      <button id="exportWavBtn" class="btn-imp" style="background:#0055ff">WAV</button>
+      <button id="export1BitBtn" class="btn-imp" style="background:#222">1-BIT</button>
+      <button id="arpBtn" class="btn-arp" style="background:#ff6b35;color:#000;padding:8px 12px;border:none;border-radius:6px;font-weight:bold">ARP OFF</button>
+      <button id="scDelayBtn" style="background:#1e1e3d;color:#00ffff;padding:8px 10px;border:2px solid #000;border-radius:6px;font-family:'Press Start 2P';font-size:9px;cursor:pointer;box-shadow:inset 0 -3px 0 rgba(0,0,0,.6)">SC+DL OFF</button>
+      <select id="arpType" style="background:#1a1a1a;color:#00ff88;border:1px solid #333;padding:6px;border-radius:4px">
+        <option value="up">Cima</option>
+        <option value="down">Baixo</option>
+        <option value="updown">Cima-Baixo</option>
+        <option value="random">Aleatório</option>
+      </select>
+      <div class="bpm">BPM <input id="bpm" type="number" value="125" min="60" max="240"></div>
+    </div>
+  </div>
+
+  <div class="screen-bezel">
+    <div class="screen">
+      <div class="tabs">
+        <button data-tab="padroes" class="active">PADRÕES</button>
+        <button data-tab="mix">MIX</button>
+        <button data-tab="instr">INSTR</button>
+        <button data-tab="wave">WAVE</button>
+        <button data-tab="pesquisa">PESQUISA</button>
+      </div>
+
+      <div id="tab-padroes" class="tab-content active">
+        <div class="pattern-header">
+          <div>PADRÃO 00 · CANAL <span id="chInfo">1</span></div>
+          <div class="pattern-tools">
+            <button id="clearCh">LIMPAR</button>
+            <button id="delNote">APAGAR</button>
+          </div>
+        </div>
+        <div id="patternGrid"></div>
+      </div>
+
+      <div id="tab-mix" class="tab-content">
+        <div id="mixer"></div>
+      </div>
+
+      <div id="tab-instr" class="tab-content">
+        <div class="instr-grid">
+          <label>INSTRUMENTO
+            <select id="instrSelect"></select>
+          </label>
+          <label>CHIP
+            <select id="chipSelect"></select>
+          </label>
+          <label>PRESETS
+            <select id="presetSelect"></select>
+          </label>
+          <label>VOLUME
+            <select id="instrVol">
+              <option>100%</option><option>90%</option><option>80%</option><option>70%</option><option>60%</option>
+            </select>
+          </label>
+        </div>
+        <div class="adsr">
+          <div><span>ATAQUE</span><input id="atk" type="range" min="0" max="100" value="1"></div>
+          <div><span>DECAIMENTO</span><input id="dec" type="range" min="0" max="100" value="10"></div>
+          <div><span>SUSTENTAR</span><input id="sus" type="range" min="0" max="100" value="70"></div>
+          <div><span>LIBERAÇÃO</span><input id="rel" type="range" min="0" max="100" value="20"></div>
+        </div>
+        <div class="wave-opts">
+          <label>ONDA
+            <select id="waveType">
+              <option value="pulse">Pulse</option>
+              <option value="saw">Saw</option>
+              <option value="triangle">Triangle</option>
+              <option value="sine">Sine</option>
+              <option value="noise">Noise</option>
+              <option value="custom">Wavetable</option>
+              <option value="fm">FM</option>
+            </select>
+          </label>
+          <label id="noiseModeLabel" style="display:none">NOISE
+            <select id="noiseMode">
+              <option value="white">White (15-bit)</option>
+              <option value="periodic">Periodic (7-bit)</option>
+            </select>
+          </label>
+          <label>DUTY <input id="duty" type="range" min="0" max="100" value="50"></label>
+        </div>
+        <div class="sample-load" style="margin-top:8px;background:rgba(0,0,0,.08);padding:6px;border-radius:4px;border:1px solid rgba(0,0,0,.15)">
+          <button id="loadSampleBtn" style="background:var(--gb-1);color:var(--gb-0);border:1px solid var(--gb-0);font-family:'Press Start 2P';font-size:8px;padding:6px 8px;border-radius:3px;cursor:pointer;width:100%">CARREGAR AMOSTRA 16-BIT</button>
+          <input type="file" id="sampleFile" accept="audio/*,.wav,.mp3,.ogg" style="display:none">
+          <div id="sampleInfo" style="font-family:'Press Start 2P';font-size:7px;margin-top:4px;opacity:.8;text-align:center">Nenhuma amostra · clique para criar instrumento</div>
+        </div>
+      </div>
+
+      <div id="tab-wave" class="tab-content">
+        <canvas id="waveCanvas" width="512" height="128"></canvas>
+        <div class="wave-tools">
+          <button data-wave="sine">Sine</button>
+          <button data-wave="saw">Saw</button>
+          <button data-wave="square">Square</button>
+          <button data-wave="random">Random</button>
+          <button data-wave="smooth">Suavizar</button>
+        </div>
+        <div class="wave-info">64 passos · desenhe para Game Boy / FDS</div>
+      </div>
+
+      <div id="tab-chips" class="tab-content">
+        <div class="chips-list" id="chipsList"></div>
+      </div>
+      
+      <div id="tab-pesquisa" class="tab-content">
+        <div style="padding:8px; overflow:auto; max-height:240px; font-size:10px; line-height:1.3">
+          <h3 style="margin:0 0 6px;color:#ff0040">Pesquisa Completa – 42 Chips Clássicos</h3>
+          <input id="chipSearch" placeholder="Pesquisar chip, ano, sistema..." style="width:100%;padding:4px;margin-bottom:4px;background:#0f380f;color:#9bbc0f;border:1px solid #306230;font-family:inherit;font-size:10px">
+          <table id="chipTable" style="width:100%; border-collapse:collapse; margin-bottom:6px">
+            <thead><tr style="background:#0f380f;color:#9bbc0f;position:sticky;top:0"><th>Chip</th><th>Ano</th><th>Fabricante</th><th>Sistemas</th><th>Canais/Tipo</th><th>Jogo</th></tr></thead>
+            <tbody>
+<tr data-detail="VRC7: 6 canais FM baseados no YM2413. Lançado 1991 pela Konami. Usado apenas em Lagrange Point. Som de sinos DX7-like."><td>VRC7</td><td>1989/91</td><td>Konami</td><td>Famicom</td><td>6 FM</td><td>Lagrange Point</td></tr>
+<tr data-detail="Namco 163: 8 wavetables, lançado 05/04/1988. O mais avançado do Famicom, permite samples curtos. Usado em 12 jogos japoneses."><td>Namco 163</td><td>1988</td><td>Namco</td><td>Famicom</td><td>8 wavetable</td><td>Rolling Thunder JP</td></tr>
+<tr data-detail="Ricoh 2A03: CPU+APU do NES, 1983. 2 pulse, 1 triangle, noise, DPCM. Som nasal clássico."><td>Ricoh 2A03</td><td>1983</td><td>Ricoh</td><td>NES/Famicom</td><td>2P+T+N+DPCM</td><td>Super Mario Bros</td></tr>
+<tr data-detail="YM2612 OPN2: 6 canais FM 4-op + DAC. 1988 Yamaha. 'Ladder effect' distorção característica do Mega Drive."><td>YM2612</td><td>1988</td><td>Yamaha</td><td>Mega Drive</td><td>6 FM + DAC</td><td>Streets of Rage 2</td></tr>
+<tr data-detail="SN76489: 3 tons + ruído, 1979 TI. Usado em Master System, Game Gear, BBC Micro."><td>SN76489</td><td>1979</td><td>Texas Instruments</td><td>SMS/GG/BBC</td><td>3+1 PSG</td><td>Sonic</td></tr>
+<tr data-detail="AY-3-8910: 3 PSG + envelope, 1978 GI. Base do som MSX e Spectrum 128."><td>AY-3-8910</td><td>1978</td><td>General Instrument</td><td>MSX/Spectrum</td><td>3 PSG</td><td>Gyruss</td></tr>
+<tr data-detail="SID 6581: sintetizador analógico 3 vozes com filtro multimodo, 1982. Som quente do C64."><td>SID 6581</td><td>1982</td><td>MOS</td><td>C64</td><td>3 synth</td><td>Ghostbusters</td></tr>
+<tr data-detail="SPC700: CPU Sony + DSP 8 canais sample ADPCM, 1990. Reverberação do SNES."><td>SPC700</td><td>1990</td><td>Sony</td><td>SNES</td><td>8 sample</td><td>Chrono Trigger</td></tr>
+<tr data-detail="POKEY: 4 canais 8-bit com distorção, 1979 Atari. Efeitos únicos."><td>POKEY</td><td>1979</td><td>Atari</td><td>Atari 800</td><td>4 PSG</td><td>Ballblazer</td></tr>
+<tr data-detail="Atari TIA: 2 canais distorção, 1977. Som áspero do 2600."><td>TIA</td><td>1977</td><td>Atari</td><td>2600</td><td>2 PSG</td><td>Pitfall!</td></tr>
+<tr data-detail="VRC6: 2 pulse + saw, 1986 Konami. Harmônicos ricos em Castlevania III JP."><td>VRC6</td><td>1986</td><td>Konami</td><td>Famicom</td><td>2P+saw</td><td>Castlevania III</td></tr>
+<tr data-detail="FDS: wavetable 64 passos, 1986 Ricoh. Bass modulável."><td>FDS</td><td>1986</td><td>Ricoh</td><td>Disk System</td><td>1 wavetable</td><td>Zelda</td></tr>
+<tr data-detail="MMC5: 2 pulse extras, 1988 Nintendo. Reforço grave."><td>MMC5</td><td>1988</td><td>Nintendo</td><td>NES</td><td>2 pulse</td><td>Just Breed</td></tr>
+<tr data-detail="Game Boy: 2 pulse + wave + noise, 1989. Lo-fi."><td>DMG APU</td><td>1989</td><td>Nintendo</td><td>Game Boy</td><td>4 canais</td><td>Tetris</td></tr>
+<tr data-detail="YM2151 OPM: 8 FM 4-op, 1984. Arcade brilhante."><td>YM2151</td><td>1984</td><td>Yamaha</td><td>Arcade/X68k</td><td>8 FM</td><td>Marble Madness</td></tr>
+<tr data-detail="YM2413 OPLL: 9 FM 2-op barato, 1985. MSX-Music."><td>YM2413</td><td>1985</td><td>Yamaha</td><td>MSX</td><td>9 FM</td><td>Space Manbow</td></tr>
+<tr data-detail="YM3812 OPL2: 9 FM, 1985. Som do AdLib/PC."><td>OPL2</td><td>1985</td><td>Yamaha</td><td>PC</td><td>9 FM</td><td>Silpheed</td></tr>
+<tr data-detail="YMF262 OPL3: 18 FM estéreo, 1990."><td>OPL3</td><td>1990</td><td>Yamaha</td><td>SB Pro 2</td><td>18 FM</td><td>Doom</td></tr>
+<tr data-detail="YM2608 OPNA: 6 FM + SSG + ADPCM, 1985. PC-98."><td>OPNA</td><td>1985</td><td>Yamaha</td><td>PC-98</td><td>6FM+ADPCM</td><td>Ys II</td></tr>
+<tr data-detail="YM2610 OPNB: Neo Geo, 1987. 4FM+7 ADPCM."><td>OPNB</td><td>1987</td><td>Yamaha</td><td>Neo Geo</td><td>4FM+ADPCM</td><td>Metal Slug</td></tr>
+<tr data-detail="YM2203 OPN: 3FM+3SSG, 1984."><td>OPN</td><td>1984</td><td>Yamaha</td><td>PC-88</td><td>3FM</td><td>Druaga</td></tr>
+<tr data-detail="HuC6280: 6 wavetable, 1987 Hudson. PC Engine."><td>HuC6280</td><td>1987</td><td>Hudson</td><td>PC Engine</td><td>6 wave</td><td>R-Type</td></tr>
+<tr data-detail="SCC: 5 wavetable, 1987 Konami. MSX."><td>SCC</td><td>1987</td><td>Konami</td><td>MSX</td><td>5 wave</td><td>Nemesis 2</td></tr>
+<tr data-detail="SCC+: versão expandida, 1988."><td>SCC+</td><td>1988</td><td>Konami</td><td>MSX</td><td>5 wave+</td><td>Snatcher</td></tr>
+<tr data-detail="MSM5205: ADPCM 4-bit, 1982 OKI. Voz arcade."><td>MSM5205</td><td>1982</td><td>OKI</td><td>Arcade</td><td>1 ADPCM</td><td>1942</td></tr>
+<tr data-detail="MSM6295: 4 canais ADPCM, 1989. CPS1."><td>MSM6295</td><td>1989</td><td>OKI</td><td>CPS1</td><td>4 ADPCM</td><td>SF II</td></tr>
+<tr data-detail="Paula: 4 PCM 8-bit estéreo, 1985 Amiga."><td>Paula</td><td>1985</td><td>Commodore</td><td>Amiga</td><td>4 PCM</td><td>Shadow Beast</td></tr>
+<tr data-detail="C140: 24 PCM, 1990 Namco. Arcade."><td>C140</td><td>1990</td><td>Namco</td><td>System 2</td><td>24 PCM</td><td>Ridge Racer</td></tr>
+<tr data-detail="MultiPCM: 28 PCM, 1991 Sega. Model 2."><td>MultiPCM</td><td>1991</td><td>Sega/Yamaha</td><td>Model 2</td><td>28 PCM</td><td>Daytona USA</td></tr>
+<tr data-detail="RF5C68: 8 PCM, 1991 Ricoh. Sega CD."><td>RF5C68</td><td>1991</td><td>Ricoh</td><td>Sega CD</td><td>8 PCM</td><td>Sonic CD</td></tr>
+<tr data-detail="C352: 32 PCM, 1995 Namco. System 22."><td>C352</td><td>1995</td><td>Namco</td><td>System 22</td><td>32 PCM</td><td>Tekken 2</td></tr>
+<tr data-detail="YMZ280B: 8 ADPCM, 1993 Yamaha. Cave."><td>YMZ280B</td><td>1993</td><td>Yamaha</td><td>Arcade</td><td>8 ADPCM</td><td>Dodonpachi</td></tr>
+<tr data-detail="YMF278 OPL4: 18FM+24PCM, 1994. Último FM Yamaha."><td>OPL4</td><td>1994</td><td>Yamaha</td><td>MSX</td><td>18FM+24PCM</td><td>Xak</td></tr>
+<tr data-detail="SID 8580: versão limpa do SID, 1986."><td>SID 8580</td><td>1986</td><td>MOS</td><td>C64C</td><td>3 synth</td><td>Last Ninja 2</td></tr>
+<tr data-detail="SAA1099: 6 PSG estéreo, 1983 Philips."><td>SAA1099</td><td>1983</td><td>Philips</td><td>SAM Coupé</td><td>6 PSG</td><td>Lemmings</td></tr>
+<tr data-detail="YM2149: clone do AY, 1983 Yamaha. Atari ST."><td>YM2149</td><td>1983</td><td>Yamaha</td><td>Atari ST</td><td>3 PSG</td><td>Xenon 2</td></tr>
+            </tbody>
+          </table>
+          <div id="chipDetail" style="display:none;background:#0f380f;border:1px solid #306230;padding:6px;margin-top:6px;margin-bottom:6px;color:#9bbc0f"></div>
+          <div id="sampleLibrary" style="display:grid;gap:8px;margin-bottom:8px"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display:flex;justify-content:center;gap:8px;margin-top:10px;align-items:center">
+    <button id="octDown" style="background:#333;color:#9bbc0f;padding:6px 10px;border:2px solid #000;border-radius:6px;font-family:'Press Start 2P';font-size:8px">OCT-</button>
+    <span id="octDisplay" style="font-family:'Press Start 2P';font-size:9px;color:#9bbc0f;min-width:60px;text-align:center">C3-B5</span>
+    <button id="octUp" style="background:#333;color:#9bbc0f;padding:6px 10px;border:2px solid #000;border-radius:6px;font-family:'Press Start 2P';font-size:8px">OCT+</button>
+  </div>
+
+  <div class="piano-wrap">
+    <div class="piano" id="piano"></div>
+  </div>
+  <div class="speaker">
+    <div></div><div></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const chips = [
+  "NES 2A03 Pulse","NES 2A03 Triangle","NES 2A03 Noise","NES 2A03 DPCM","NES VRC6 Pulse","NES VRC6 Saw",
+  "NES VRC7 FM","NES FDS Wavetable","NES MMC5 Pulse","NES Namco 163",
+  "SNES SPC700 Sample","SNES SPC700 Pad","SNES SPC700 Brass","SNES SPC700 String","SNES SPC700 Bass",
+  "MD YM2612 FM Ch1","MD YM2612 FM Ch2","MD YM2612 FM Ch3","MD YM2612 FM Ch4","MD SN76489 PSG","MD DAC Sample",
+  "GB DMG Pulse 12.5%","GB DMG Pulse 25%","GB DMG Pulse 50%","GB DMG Pulse 75%","GB DMG Wavetable","GB DMG Noise Periodic",
+  "GBA Direct Sound A","GBA Direct Sound B","GBA PSG",
+  "C64 SID 6581 Pulse","C64 SID 6581 Saw","C64 SID 8580 Triangle","C64 SID Noise",
+  "Atari POKEY 4bit","Atari TIA","Atari Lynx",
+  "YM2151 FM OP4","YM2413 OPLL","AY-3-8910 PSG","YM2610 ADPCM","YM2203 OPN","YM2608 OPNA",
+  "YM3812 OPL2","YMF262 OPL3","OKI MSM5205","OKI MSM6295","Sega MultiPCM","Konami SCC","Konami K051649","Namco C140"
+];
+
+const presetGroups = [
+  {name:'NES Pulse Lead', count:20, chip:'NES 2A03 Pulse', wave:'pulse'},
+  {name:'SNES Pad', count:20, chip:'SNES SPC700 Pad', wave:'sine'},
+  {name:'Mega Drive FM Bass', count:20, chip:'MD YM2612 FM Ch1', wave:'fm'},
+  {name:'C64 SID Lead', count:20, chip:'C64 SID 6581 Pulse', wave:'pulse'},
+  {name:'Game Boy Wavetable', count:20, chip:'GB DMG Wavetable', wave:'custom'},
+  {name:'Arcade FM', count:20, chip:'YM2151 FM OP4', wave:'fm'},
+  {name:'NES VRC7 Bell', count:15, chip:'NES VRC7 FM', wave:'fm'},
+  {name:'FDS Choir', count:15, chip:'NES FDS Wavetable', wave:'custom'},
+  {name:'AY Chiptune Arp', count:20, chip:'AY-3-8910 PSG', wave:'square'},
+  {name:'POKEY FX', count:20, chip:'Atari POKEY 4bit', wave:'noise'},
+  {name:'SNES Orchestra Hit', count:20, chip:'SNES SPC700 Brass', wave:'saw'}
+];
+
+let audioCtx, masterGain, channelGains=[], channelPanners=[], isPlaying=false, schedulerId=null, currentPlayStep=0;
+let sidechainGain, delayNode, delayWet, delayFeedback, scLFO, scDelayActive=false;
+
+function genSine(){ const a=[]; for(let i=0;i<64;i++) a.push(0.5+0.5*Math.sin(i/64*2*Math.PI)); return a; }
+
+let song = {
+  bpm:125,
+  totalSteps: 64,
+  patterns: Array(5).fill().map(()=> Array(96).fill(null)),
+  mixer:[85,85,80,75,70],
+  pan:[0,0,0,0,0],
+  mute:[false,false,false,false,false],
+  solo:[false,false,false,false,false],
+  master:0.9,
+  instruments: Array(16).fill().map((_,i)=>({
+    name:`INST ${i+1}`,
+    chip: chips[i%chips.length],
+    preset:'',
+    wave:'pulse',
+    duty:0.5,
+    attack:0.01, decay:0.1, sustain:0.7, release:0.2,
+    volume:0.8,
+    waveTable: genSine(),
+    noiseMode:'white'
+  })),
+  currentInstrument:0,
+  currentStep:0,
+  currentChannel:0
+};
+
+function noteToMidi(n){ if(!n) return 60; const m={C:0,'C#':1,D:2,'D#':3,E:4,F:5,'F#':6,G:7,'G#':8,A:9,'A#':10,B:11}; const note=n.slice(0,-2),oct=parseInt(n.slice(-1)); return (oct+1)*12 + m[note.replace('-','')] }
+function midiToFreq(m){ return 440*Math.pow(2,(m-69)/12) }
+
+function initAudio(){
+  if(audioCtx) return;
+  audioCtx = new (window.AudioContext||webkitAudioContext)();
+  masterGain = audioCtx.createGain(); masterGain.gain.value=song.master||0.9;
+  // limiter master
+  const limiter = audioCtx.createDynamicsCompressor();
+  limiter.threshold.value = -6; limiter.knee.value = 0; limiter.ratio.value = 12; limiter.attack.value = 0.003; limiter.release.value = 0.25;
+  
+  // --- SIDECHAIN + DELAY (1 botão) ---
+  sidechainGain = audioCtx.createGain(); sidechainGain.gain.value = 1;
+  delayNode = audioCtx.createDelay(1.0); delayNode.delayTime.value = 0.32;
+  delayFeedback = audioCtx.createGain(); delayFeedback.gain.value = 0.38;
+  delayWet = audioCtx.createGain(); delayWet.gain.value = 0;
+  
+  masterGain.connect(sidechainGain);
+  sidechainGain.connect(limiter);
+  // delay send
+  sidechainGain.connect(delayNode);
+  delayNode.connect(delayFeedback);
+  delayFeedback.connect(delayNode);
+  delayNode.connect(delayWet);
+  delayWet.connect(limiter);
+  
+  limiter.connect(audioCtx.destination);
+  channelGains = []; channelPanners = [];
+  for(let i=0;i<5;i++){
+    const g=audioCtx.createGain(); g.gain.value=song.mixer[i]/100*0.8;
+    const p=audioCtx.createStereoPanner(); p.pan.value=(song.pan[i]||0)/100;
+    g.connect(p); p.connect(masterGain);
+    channelGains.push(g); channelPanners.push(p);
+  }
+}
+
+function getOscillator(instr,freq){
+  const chip=instr.chip||'', wave=instr.wave;
+  if(wave==='noise' || chip.includes('Noise') || chip.includes('POKEY') || chip.includes('TIA')){
+    const buf=audioCtx.createBuffer(1,audioCtx.sampleRate*0.5,audioCtx.sampleRate);
+    const d=buf.getChannelData(0);
+    const isPeriodic = instr.noiseMode==='periodic' || chip.includes('Periodic');
+    if(isPeriodic){
+      // GB modo periodic: LFSR 7-bit (som metálico)
+      let lfsr = 0x7F;
+      for(let i=0;i<d.length;i++){
+        d[i] = (lfsr & 1) ? 0.7 : -0.7;
+        const bit = ((lfsr ^ (lfsr >> 1)) & 1);
+        lfsr = (lfsr >> 1) | (bit << 6);
+      }
+    } else {
+      for(let i=0;i<d.length;i++) d[i]=Math.random()*2-1;
+    }
+    const src=audioCtx.createBufferSource(); src.buffer=buf; src.loop=true; return src;
+  }
+  if(wave==='custom' || chip.includes('Wavetable') || chip.includes('FDS') || chip.includes('Namco') || chip.includes('SCC')){
+    const src=audioCtx.createBufferSource(); const size=1024; const buf=audioCtx.createBuffer(1,size,audioCtx.sampleRate);
+    const data=buf.getChannelData(0); const wt=instr.waveTable;
+    for(let i=0;i<size;i++){ const idx=Math.floor(i/size*64); data[i]=(wt[idx]-0.5)*2; }
+    src.buffer=buf; src.loop=true; src.playbackRate.value = freq*size/audioCtx.sampleRate; return src;
+  }
+  if(wave==='fm' || chip.includes('FM') || chip.includes('YM') || chip.includes('OPL') || chip.includes('VRC7') || chip.includes('OPN')){
+    const car=audioCtx.createOscillator(); car.type='sine'; car.frequency.value=freq;
+    const mod=audioCtx.createOscillator(); mod.type='sine'; mod.frequency.value=freq*(chip.includes('VRC7')?3:2.01);
+    const mg=audioCtx.createGain(); mg.gain.value=chip.includes('YM2151')?180:90;
+    mod.connect(mg); mg.connect(car.frequency); car._mod=mod; return car;
+  }
+  const osc=audioCtx.createOscillator();
+  let type='square';
+  if(wave==='sine' || chip.includes('SPC700')) type='sine';
+  else if(wave==='saw' || chip.includes('Saw')) type='sawtooth';
+  else if(wave==='triangle' || chip.includes('Triangle')) type='triangle';
+  else if(wave==='pulse' || chip.includes('Pulse') || chip.includes('PSG') || chip.includes('DMG')) type='square';
+  osc.type=type; osc.frequency.value=freq; return osc;
+}
+
+function triggerSound(ch,freq,instr){
+  if(!audioCtx) initAudio();
+  const now=audioCtx.currentTime;
+  const src=getOscillator(instr,freq);
+  const gain=audioCtx.createGain(); gain.gain.value=0;
+  const filt=audioCtx.createBiquadFilter(); filt.type='lowpass';
+  let fc=12000;
+  if(instr.chip.includes('C64')) fc=3500;
+  else if(instr.chip.includes('NES')) fc=14000;
+  else if(instr.chip.includes('SNES')) fc=9000;
+  else if(instr.chip.includes('GB')) fc=8000;
+  else if(instr.chip.includes('POKEY')) fc=5000;
+  filt.frequency.value=fc;
+  src.connect(filt); filt.connect(gain); gain.connect(channelGains[ch]);
+  const a=instr.attack, d=instr.decay, s=instr.sustain, r=instr.release;
+  const vol=instr.volume * (song.mixer[ch]/100);
+  gain.gain.cancelScheduledValues(now);
+  gain.gain.setValueAtTime(0,now);
+  gain.gain.linearRampToValueAtTime(vol,now+a);
+  gain.gain.linearRampToValueAtTime(vol*s,now+a+d);
+  gain.gain.setValueAtTime(vol*s,now+a+d+0.05);
+  gain.gain.linearRampToValueAtTime(0.0001,now+a+d+0.05+r);
+  src.start(now); if(src._mod) src._mod.start(now);
+  src.stop(now+a+d+r+0.1); if(src._mod) src._mod.stop(now+a+d+r+0.1);
+}
+
+function showToast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1800); }
+
+function renderGrid(){
+  const grid=document.getElementById('patternGrid'); grid.innerHTML='';
+  for(let step=0;step<song.totalSteps;step++){
+    const row=document.createElement('div'); row.className='grid-row';
+    const sn=document.createElement('div'); sn.className='step-num'; sn.textContent=step.toString(16).toUpperCase().padStart(2,'0');
+    if(step===song.currentStep) sn.style.background='#ff0040';
+    row.appendChild(sn);
+    for(let ch=0;ch<5;ch++){
+      const cell=document.createElement('div'); cell.className='cell';
+      cell.textContent=song.patterns[ch][step]||'---';
+      if(step===song.currentStep && ch===song.currentChannel) cell.classList.add('active');
+      if(isPlaying && step===currentPlayStep) cell.classList.add('playing');
+      cell.onclick=()=>{ song.currentStep=step; song.currentChannel=ch; renderGrid(); document.getElementById('chInfo').textContent=ch+1; };
+      cell.ondblclick=()=>{ song.patterns[ch][step]=null; renderGrid(); };
+      row.appendChild(cell);
+    }
+    grid.appendChild(row);
+  }
+  // botões adicionar/remover passos
+  const addRow=document.createElement('div');
+  addRow.style.cssText='display:flex;justify-content:center;gap:8px;padding:8px;margin-top:4px;flex-wrap:wrap';
+  const btnAdd=document.createElement('button');
+  btnAdd.textContent='+ ADICIONAR +32 ('+song.totalSteps+' → '+Math.min(96,song.totalSteps+32)+')';
+  btnAdd.style.cssText='background:#9bbc0f;color:#0f380f;border:2px solid #0f380f;padding:6px 10px;font-family:"Press Start 2P";font-size:8px;cursor:pointer;border-radius:4px';
+  btnAdd.onclick=()=>{
+    if(song.totalSteps>=96){ showToast('Máximo 96 passos'); return; }
+    song.totalSteps=Math.min(96, song.totalSteps+32);
+    for(let ch=0;ch<5;ch++){ while(song.patterns[ch].length < song.totalSteps) song.patterns[ch].push(null); }
+    renderGrid();
+    showToast('Adicionado! Agora: '+song.totalSteps+' passos');
+    document.querySelector('.wave-info').textContent=song.totalSteps+' passos · desenhe para Game Boy / FDS';
+  };
+  const btnRem=document.createElement('button');
+  btnRem.textContent='- REMOVER -32 ('+song.totalSteps+' → '+Math.max(16,song.totalSteps-32)+')';
+  btnRem.style.cssText='background:#ff0040;color:#fff;border:2px solid #0f380f;padding:6px 10px;font-family:"Press Start 2P";font-size:8px;cursor:pointer;border-radius:4px';
+  btnRem.onclick=()=>{
+    if(song.totalSteps<=16){ showToast('Mínimo 16 passos'); return; }
+    song.totalSteps=Math.max(16, song.totalSteps-32);
+    if(song.currentStep>=song.totalSteps) song.currentStep=song.totalSteps-1;
+    renderGrid();
+    showToast('Removido! Agora: '+song.totalSteps+' passos');
+    document.querySelector('.wave-info').textContent=song.totalSteps+' passos · desenhe para Game Boy / FDS';
+  };
+  addRow.appendChild(btnAdd);
+  addRow.appendChild(btnRem);
+  grid.appendChild(addRow);
+  document.getElementById('chInfo').textContent=song.currentChannel+1;
+}
+
+function renderMixer(){
+  const m=document.getElementById('mixer'); m.innerHTML='';
+  const names=['LEAD NES','BASS TRI','KICK 808','DRUMS','PAD C64'];
+  const colors=['#ff0040','#00ff88','#ffaa00','#00aaff','#aa00ff'];
+  for(let i=0;i<5;i++){
+    const div=document.createElement('div'); div.className='mix-ch';
+    div.style.display='block';
+    div.style.padding='8px';
+    div.style.marginBottom='6px';
+    div.style.borderLeft=`4px solid ${colors[i]}`;
+    div.style.background='rgba(0,0,0,0.08)';
+    div.innerHTML=`
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+        <button class="ms-btn" data-ch="${i}" data-type="mute" style="width:26px;height:22px;background:${song.mute[i]?'#ff0040':'#2a2a2a'};color:#fff;border:1px solid #000;border-radius:3px;font-size:10px;font-weight:bold">M</button>
+        <button class="ms-btn" data-ch="${i}" data-type="solo" style="width:26px;height:22px;background:${song.solo[i]?'#00ff88':'#2a2a2a'};color:${song.solo[i]?'#000':'#fff'};border:1px solid #000;border-radius:3px;font-size:10px;font-weight:bold">S</button>
+        <div style="flex:1;font-size:12px;font-weight:bold;color:${colors[i]};letter-spacing:0.5px">${names[i]}</div>
+        <div class="mix-val" style="width:38px;text-align:right;font-size:12px;font-weight:bold;color:#000">${song.mixer[i]}%</div>
+      </div>
+      <div style="margin-bottom:6px">
+        <input type="range" min="0" max="100" value="${song.mixer[i]}" data-ch="${i}" data-type="vol" style="width:100%;height:22px;accent-color:${colors[i]}">
+      </div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <span style="font-size:10px;width:14px;color:#000;font-weight:bold">L</span>
+        <input type="range" min="-100" max="100" value="${song.pan[i]}" data-ch="${i}" data-type="pan" style="flex:1;height:18px;accent-color:#555">
+        <span style="font-size:10px;width:14px;text-align:right;color:#000;font-weight:bold">R</span>
+      </div>`;
+    m.appendChild(div);
+  }
+  // master
+  const masterDiv=document.createElement('div'); masterDiv.style.marginTop='10px'; masterDiv.style.padding='8px'; masterDiv.style.background='rgba(0,0,0,0.15)'; masterDiv.style.borderRadius='4px'; masterDiv.style.border='1px solid #ffaa00';
+  masterDiv.innerHTML=`
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+      <label style="font-size:12px;color:#ffaa00;flex:1;font-weight:bold">MASTER LIMITER</label>
+      <div id="masterVal" style="width:38px;text-align:right;font-size:12px;font-weight:bold;color:#000">${Math.round(song.master*100)}%</div>
+    </div>
+    <input id="masterVol" type="range" min="0" max="100" value="${song.master*100}" style="width:100%;height:24px;accent-color:#ffaa00">`;
+  m.appendChild(masterDiv);
+
+  m.querySelectorAll('input[data-type="vol"]').forEach(inp=>{
+    inp.oninput=e=>{ const ch=+e.target.dataset.ch; song.mixer[ch]=+e.target.value; e.target.closest('.mix-ch').querySelector('.mix-val').textContent=song.mixer[ch]+'%'; updateChannelGain(ch); };
+  });
+  m.querySelectorAll('input[data-type="pan"]').forEach(inp=>{
+    inp.oninput=e=>{ const ch=+e.target.dataset.ch; song.pan[ch]=+e.target.value; if(channelPanners[ch]) channelPanners[ch].pan.value=song.pan[ch]/100; };
+  });
+  m.querySelectorAll('.ms-btn').forEach(btn=>{
+    btn.onclick=e=>{ const ch=+e.target.dataset.ch; const type=e.target.dataset.type; if(type==='mute'){ song.mute[ch]=!song.mute[ch]; e.target.style.background=song.mute[ch]?'#ff0040':'#2a2a2a'; } else { song.solo[ch]=!song.solo[ch]; e.target.style.background=song.solo[ch]?'#00ff88':'#2a2a2a'; e.target.style.color=song.solo[ch]?'#000':'#fff'; } for(let i=0;i<5;i++) updateChannelGain(i); };
+  });
+  document.getElementById('masterVol').oninput=e=>{ song.master=e.target.value/100; document.getElementById('masterVal').textContent=e.target.value+'%'; if(masterGain) masterGain.gain.value=song.master; };
+}
+
+function updateChannelGain(ch){
+  if(!channelGains[ch]) return;
+  const anySolo = song.solo.some(s=>s);
+  const muted = song.mute[ch] || (anySolo && !song.solo[ch]);
+  const vol = muted ? 0 : song.mixer[ch]/100*0.8;
+  channelGains[ch].gain.value = vol;
+}
+
+function updateInstrUI(){
+  const ins = song.instruments[song.currentInstrument];
+  document.getElementById('noiseModeLabel').style.display = (ins.wave==='noise' || ins.chip.includes('Noise')) ? 'flex' : 'none';
+  document.getElementById('noiseMode').value = ins.noiseMode || 'white';
+  const instr=song.instruments[song.currentInstrument];
+  document.getElementById('chipSelect').value=instr.chip;
+  document.getElementById('waveType').value=instr.wave;
+  document.getElementById('atk').value=instr.attack*100;
+  document.getElementById('dec').value=instr.decay*100;
+  document.getElementById('sus').value=instr.sustain*100;
+  document.getElementById('rel').value=instr.release*50;
+  document.getElementById('duty').value=instr.duty*100;
+  document.getElementById('instrVol').selectedIndex=Math.round((1-instr.volume)*4);
+}
+
+function drawWave(){
+  const c=document.getElementById('waveCanvas'), ctx=c.getContext('2d');
+  const wt=song.instruments[song.currentInstrument].waveTable;
+  ctx.fillStyle='#8bac0f'; ctx.fillRect(0,0,c.width,c.height);
+  ctx.strokeStyle='rgba(15,56,15,0.2)'; ctx.lineWidth=1;
+  for(let i=0;i<=8;i++){ const y=i/8*c.height; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(c.width,y); ctx.stroke(); }
+  for(let i=0;i<=64;i+=8){ const x=i/64*c.width; ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,c.height); ctx.stroke(); }
+  ctx.strokeStyle='#0f380f'; ctx.lineWidth=2; ctx.beginPath();
+  for(let i=0;i<64;i++){ const x=i/63*c.width; const y=(1-wt[i])*c.height*0.85 + c.height*0.075; if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); }
+  ctx.stroke();
+  ctx.fillStyle='#0f380f'; for(let i=0;i<64;i++){ const x=i/63*c.width; const y=(1-wt[i])*c.height*0.85 + c.height*0.075; ctx.fillRect(x-1,y-1,2,2); }
+}
+
+function setWavePoint(e){
+  const c=document.getElementById('waveCanvas'), r=c.getBoundingClientRect();
+  const x=(e.clientX-r.left)/r.width, y=(e.clientY-r.top)/r.height;
+  const idx=Math.max(0,Math.min(63,Math.floor(x*64)));
+  const wt=song.instruments[song.currentInstrument].waveTable;
+  wt[idx]=1-Math.max(0,Math.min(1,y));
+  drawWave();
+}
+
+document.addEventListener('DOMContentLoaded',()=>{
+  // populate selects
+  const chipSel=document.getElementById('chipSelect');
+  chips.forEach(c=>{ const o=document.createElement('option'); o.value=c; o.textContent=c; chipSel.appendChild(o); });
+  const presetSel=document.getElementById('presetSelect');
+  presetSel.innerHTML='<option value="">-- selecionar --</option>';
+  presetGroups.forEach(g=>{ const og=document.createElement('optgroup'); og.label=g.name;
+    for(let i=1;i<=g.count;i++){ const v=`${g.name}#${String(i).padStart(2,'0')}`; const o=document.createElement('option'); o.value=v; o.textContent=`${g.name} ${String(i).padStart(2,'0')}`; og.appendChild(o); }
+    presetSel.appendChild(og);
+  });
+  const instrSel=document.getElementById('instrSelect');
+  for(let i=0;i<16;i++){ const o=document.createElement('option'); o.value=i; o.textContent=`${i+1} - ${song.instruments[i].name}`; instrSel.appendChild(o); }
+
+  const chipsList=document.getElementById('chipsList');
+  chips.forEach((c,i)=>{ const d=document.createElement('div'); d.className='chip-item'; d.innerHTML=`<b>${String(i+1).padStart(2,'0')}</b>${c}`; chipsList.appendChild(d); });
+
+  renderGrid(); renderMixer(); updateInstrUI(); drawWave();
+  // pesquisa chips
+  const searchInput = document.getElementById('chipSearch');
+  const chipTable = document.getElementById('chipTable');
+  const detailBox = document.getElementById('chipDetail');
+  if(searchInput){
+    searchInput.addEventListener('input', e=>{
+      const q = e.target.value.toLowerCase();
+      chipTable.querySelectorAll('tbody tr').forEach(tr=>{
+        tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
+      });
+    });
+    chipTable.querySelectorAll('tbody tr').forEach(tr=>{
+      tr.style.cursor='pointer';
+      tr.addEventListener('click', ()=>{
+        const d = tr.dataset.detail || '';
+        detailBox.innerHTML = '<b>'+tr.cells[0].textContent+'</b> ('+tr.cells[1].textContent+') — '+d;
+        detailBox.style.display='block';
+        // também seleciona o chip no tracker
+        const chipName = tr.cells[0].textContent;
+        const chipSel = document.getElementById('chipSelect');
+        if(chipSel){
+          for(let opt of chipSel.options){ if(opt.value.includes(chipName) || chipName.includes(opt.value.split(' ')[0])){ chipSel.value=opt.value; chipSel.dispatchEvent(new Event('change')); break; } }
+        }
+      });
+    });
+  }
+
+
+
+  document.getElementById('noiseMode').onchange = e => {
+    song.instruments[song.currentInstrument].noiseMode = e.target.value;
+    showToast('Noise: ' + (e.target.value==='periodic' ? '7-bit' : '15-bit'));
+  };
+  document.getElementById('waveType').addEventListener('change', ()=>{
+    const ins = song.instruments[song.currentInstrument];
+    document.getElementById('noiseModeLabel').style.display = (ins.wave==='noise' || ins.chip.includes('Noise')) ? 'flex' : 'none';
+  });
+
+  // tabs
+  document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{ document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('active')); document.querySelectorAll('.tab-content').forEach(x=>x.classList.remove('active')); b.classList.add('active'); document.getElementById('tab-'+b.dataset.tab).classList.add('active'); });
+
+  // piano
+  const piano=document.getElementById('piano');
+  let baseOctave = 3; // começa em C3
+  function buildPiano(){
+    piano.innerHTML='';
+    const startMidi = baseOctave*12 + 12; // C3 = 48
+    const notes = [];
+    // 3 oitavas = 36 teclas (C3 a B5, depois sobe)
+    for(let i=0;i<36;i++){
+      const midi = startMidi + i;
+      const oct = Math.floor(midi/12)-1;
+      const names = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+      const name = names[midi%12];
+      const noteStr = name.includes('#') ? `${name}${oct}` : `${name}-${oct}`;
+      notes.push(noteStr);
+    }
+    notes.forEach(n=>{ const k=document.createElement('div'); k.className='key'+(n.includes('#')?' black':''); k.dataset.note=n; k.textContent=n.replace('-',''); k.onpointerdown=()=>{ initAudio(); const f=midiToFreq(noteToMidi(n)); triggerSound(song.currentChannel,f,song.instruments[song.currentInstrument]); song.patterns[song.currentChannel][song.currentStep]=n; song.currentStep=(song.currentStep+1)%song.totalSteps; renderGrid(); k.classList.add('active'); setTimeout(()=>k.classList.remove('active'),120); }; piano.appendChild(k); });
+    const first = notes[0].replace('-','');
+    const last = notes[notes.length-1].replace('-','');
+    document.getElementById('octDisplay').textContent = `${first}-${last}`;
+  }
+  buildPiano();
+  document.getElementById('octUp').onclick=()=>{ if(baseOctave<5){ baseOctave++; buildPiano(); showToast(`Oitava ${baseOctave}`); } };
+  document.getElementById('octDown').onclick=()=>{ if(baseOctave>1){ baseOctave--; buildPiano(); showToast(`Oitava ${baseOctave}`); } };
+
+  // transport
+  let arpeggioEnabled=false;
+  document.getElementById('arpBtn').onclick=()=>{ arpeggioEnabled=!arpeggioEnabled; document.getElementById('arpBtn').textContent=arpeggioEnabled?'ARP ON':'ARP OFF'; document.getElementById('arpBtn').style.background=arpeggioEnabled?'#00ff88':'#ff6b35'; showToast(arpeggioEnabled?'Arpeggio ligado':'Arpeggio desligado'); };
+  
+  // SIDECHAIN + DELAY 1-botão
+  document.getElementById('scDelayBtn').onclick=()=>{
+    initAudio();
+    scDelayActive = !scDelayActive;
+    const btn = document.getElementById('scDelayBtn');
+    const now = audioCtx.currentTime;
+    if(scDelayActive){
+      btn.textContent = 'SC+DL ON';
+      btn.style.background = '#00ffff';
+      btn.style.color = '#000';
+      delayWet.gain.cancelScheduledValues(now);
+      delayWet.gain.linearRampToValueAtTime(0.38, now+0.05);
+      delayNode.delayTime.linearRampToValueAtTime(0.32, now+0.05);
+      // sidechain LFO - bombeia no tempo
+      if(scLFO) try{scLFO.stop()}catch(e){}
+      scLFO = audioCtx.createOscillator();
+      scLFO.type = 'sawtooth';
+      scLFO.frequency.value = song.bpm/60; // 1 batida por segundo
+      const lfoGain = audioCtx.createGain(); lfoGain.gain.value = 0.35;
+      const baseGain = audioCtx.createConstantSource(); baseGain.offset.value = 0.65;
+      baseGain.connect(sidechainGain.gain);
+      scLFO.connect(lfoGain); lfoGain.connect(sidechainGain.gain);
+      scLFO.start(); baseGain.start();
+      sidechainGain._base = baseGain; sidechainGain._lfoGain = lfoGain;
+      showToast('Sidechain + Delay ON');
+    } else {
+      btn.textContent = 'SC+DL OFF';
+      btn.style.background = '#1e1e3d';
+      btn.style.color = '#00ffff';
+      delayWet.gain.cancelScheduledValues(now);
+      delayWet.gain.linearRampToValueAtTime(0, now+0.05);
+      if(scLFO){ try{scLFO.stop()}catch(e){} scLFO=null; }
+      if(sidechainGain._base){ try{sidechainGain._base.stop()}catch(e){} }
+      sidechainGain.gain.cancelScheduledValues(now);
+      sidechainGain.gain.linearRampToValueAtTime(1, now+0.05);
+      showToast('Sidechain + Delay OFF');
+    }
+  };
+  document.getElementById('playBtn').onclick=async()=>{
+    initAudio(); if(audioCtx.state==='suspended') await audioCtx.resume();
+    if(isPlaying) return; isPlaying=true; currentPlayStep=0;
+    const stepMs=60000/song.bpm/4;
+    const swing=0.57;
+    function playStep(){
+      for(let ch=0;ch<5;ch++){
+        const n=song.patterns[ch][currentPlayStep];
+        if(n){
+          let inst=song.instruments[ch];
+          // velocity bateria
+          if(ch===2){ const isDown=currentPlayStep%32===0; const vel=isDown?1.0:0.85+Math.random()*0.05; inst={...inst, volume:inst.volume*vel}; }
+          if(ch===3){
+            if(n==='A#5'||n==='G#5'){ inst={...inst, decay:0.22, release:0.16, volume:0.85*(0.9+Math.random()*0.1)}; }
+            else if(n==='F#5'){ const alt=currentPlayStep%4===0?0.72:0.58; inst={...inst, decay:0.035, release:0.02, volume:0.6*alt*(0.95+Math.random()*0.1)}; }
+            else { const isBack=[4,12,20,36,44,52,68,76,84].includes(currentPlayStep); const vel=isBack?0.95:0.55; inst={...inst, volume:inst.volume*vel*(0.97+Math.random()*0.06)}; }
+          }
+          if(ch===4 && currentPlayStep>=64 && currentPlayStep<96){ const progress=(currentPlayStep-64)/31; const cutoff=400+progress*1800; inst={...inst, cutoff:cutoff, filter:1}; }
+          if(ch===0){ const midi=noteToMidi(n); const velocityCutoff=900+(midi-60)*45; const stepVel=1+((currentPlayStep%8)/8)*0.3; inst={...inst, filter:1, cutoff:velocityCutoff*stepVel, resonance:0.25}; }
+          
+          if(ch===4 && arpeggioEnabled){
+            const rootMidi=noteToMidi(n);
+            const isMinor = currentPlayStep>=64;
+            const third = isMinor ? 3 : 4;
+            const base=[0,third,7,12];
+            const type=document.getElementById('arpType').value;
+            let pattern;
+            if(type==='up') pattern=[0,1,2,3];
+            else if(type==='down') pattern=[3,2,1,0];
+            else if(type==='updown') pattern=[0,1,2,3,2,1];
+            else pattern=[Math.floor(Math.random()*4),Math.floor(Math.random()*4),Math.floor(Math.random()*4),Math.floor(Math.random()*4)];
+            const arpSpeed = stepMs / pattern.length;
+            pattern.forEach((idx,i)=>{
+              setTimeout(()=>{
+                const arpInst={...inst, attack:0.001, decay:0.08, sustain:0, release:0.05, volume:inst.volume*0.85};
+                triggerSound(ch, midiToFreq(rootMidi+base[idx]), arpInst);
+              }, i*arpSpeed);
+            });
+          } else {
+            triggerSound(ch,midiToFreq(noteToMidi(n)),inst);
+          }
+        }
+      }
+      renderGrid();
+      const isEven=currentPlayStep%2===0;
+      const nextDelay=stepMs * (isEven ? (2*(1-swing)) : (2*swing));
+      currentPlayStep=(currentPlayStep+1)%96;
+      if(isPlaying) schedulerId=setTimeout(playStep, nextDelay);
+    }
+    playStep();
+    showToast('Tocando');
+  };
+  document.getElementById('stopBtn').onclick=()=>{ isPlaying=false; clearTimeout(schedulerId); renderGrid(); showToast('Parado'); };
+  document.getElementById('bpm').oninput=e=>{ song.bpm=+e.target.value; if(scLFO) scLFO.frequency.value = song.bpm/60; if(isPlaying){ document.getElementById('stopBtn').click(); document.getElementById('playBtn').click(); } };
+
+  // import dmf
+  document.getElementById('importDmf').onclick=()=>document.getElementById('dmfFile').click();
+  document.getElementById('dmfFile').onchange=e=>{ const f=e.target.files[0]; if(!f) return; const r=new FileReader(); r.onload=()=>{ alert(`Arquivo DefleMask carregado: ${f.name} (simulação - mapeando instrumentos)`); song.instruments[0].chip='NES 2A03 Pulse'; song.instruments[0].preset='NES Pulse Lead 01'; presetSel.value='NES Pulse Lead#01'; chipSel.value='NES 2A03 Pulse'; updateInstrUI(); showToast('DMF importado'); }; r.readAsArrayBuffer(f); };
+
+  // instr changes
+  instrSel.onchange=e=>{ song.currentInstrument=+e.target.value; updateInstrUI(); drawWave(); };
+  chipSel.onchange=e=>{ song.instruments[song.currentInstrument].chip=e.target.value; showToast('Chip: '+e.target.value); };
+  presetSel.onchange=e=>{ const v=e.target.value; if(!v) return; const [gn]=v.split('#'); const g=presetGroups.find(x=>x.name===gn); const ins=song.instruments[song.currentInstrument]; ins.chip=g.chip; ins.wave=g.wave; ins.preset=v; if(g.name.includes('Bass')){ ins.attack=0.01; ins.decay=0.2; ins.sustain=0.85; ins.release=0.15; } else if(g.name.includes('Pad')){ ins.attack=0.35; ins.decay=0.4; ins.sustain=0.7; ins.release=0.5; } else { ins.attack=0.005; ins.decay=0.1; ins.sustain=0.65; ins.release=0.18; } chipSel.value=g.chip; updateInstrUI(); drawWave(); showToast('Preset: '+v.replace('#',' ')); };
+  document.getElementById('waveType').onchange=e=>{ song.instruments[song.currentInstrument].wave=e.target.value; };
+  document.getElementById('atk').oninput=e=>song.instruments[song.currentInstrument].attack=e.target.value/100;
+  document.getElementById('dec').oninput=e=>song.instruments[song.currentInstrument].decay=e.target.value/100;
+  document.getElementById('sus').oninput=e=>song.instruments[song.currentInstrument].sustain=e.target.value/100;
+  document.getElementById('rel').oninput=e=>song.instruments[song.currentInstrument].release=e.target.value/50;
+  document.getElementById('duty').oninput=e=>song.instruments[song.currentInstrument].duty=e.target.value/100;
+  document.getElementById('instrVol').onchange=e=>{ const v=[1,0.9,0.8,0.7,0.6][e.target.selectedIndex]; song.instruments[song.currentInstrument].volume=v; };
+
+  document.getElementById('clearCh').onclick=()=>{ song.patterns[song.currentChannel].fill(null); renderGrid(); showToast('Canal limpo'); };
+  document.getElementById('delNote').onclick=()=>{ song.patterns[song.currentChannel][song.currentStep]=null; renderGrid(); };
+
+  // wave tools
+  document.querySelectorAll('[data-wave]').forEach(b=>b.onclick=()=>{ const t=b.dataset.wave; const wt=song.instruments[song.currentInstrument].waveTable; if(t==='sine'){ for(let i=0;i<64;i++) wt[i]=0.5+0.5*Math.sin(i/64*2*Math.PI); } else if(t==='saw'){ for(let i=0;i<64;i++) wt[i]=i/63; } else if(t==='square'){ for(let i=0;i<64;i++) wt[i]=i<32?1:0; } else if(t==='random'){ for(let i=0;i<64;i++) wt[i]=Math.random(); } else if(t==='smooth'){ for(let i=0;i<64;i++){ const p=wt[(i-1+64)%64], n=wt[(i+1)%64]; wt[i]=(p+wt[i]+n)/3; } } song.instruments[song.currentInstrument].wave='custom'; document.getElementById('waveType').value='custom'; drawWave(); });
+  const wc=document.getElementById('waveCanvas'); let drawing=false;
+  wc.addEventListener('pointerdown',e=>{drawing=true; wc.setPointerCapture(e.pointerId); setWavePoint(e);});
+  wc.addEventListener('pointermove',e=>{ if(drawing) setWavePoint(e); });
+  window.addEventListener('pointerup',()=>drawing=false);
+
+  // --- CARREGAR AMOSTRAS 16-BIT ---
+  const loadBtn = document.getElementById('loadSampleBtn');
+  const fileInput = document.getElementById('sampleFile');
+  const sampleInfo = document.getElementById('sampleInfo');
+  
+  if(loadBtn){
+    loadBtn.onclick = () => fileInput.click();
+    
+    fileInput.onchange = async (e) => {
+      const file = e.target.files[0];
+      if(!file) return;
+      
+      try {
+        initAudio();
+        sampleInfo.textContent = 'Carregando...';
+        
+        const arrayBuffer = await file.arrayBuffer();
+        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+        
+        // Pega primeiro canal e converte para 16-bit
+        const rawData = audioBuffer.getChannelData(0);
+        const sampleRate = audioBuffer.sampleRate;
+        
+        // Downsample para 32kHz max (estilo SNES/16-bit) e normaliza
+        const targetRate = Math.min(32000, sampleRate);
+        const ratio = sampleRate / targetRate;
+        const length = Math.floor(rawData.length / ratio);
+        const downsampled = new Float32Array(length);
+        
+        for(let i=0; i<length; i++){
+          downsampled[i] = rawData[Math.floor(i * ratio)];
+        }
+        
+        // Converte para 16-bit PCM e cria buffer
+        const sample16 = audioCtx.createBuffer(1, downsampled.length, targetRate);
+        sample16.getChannelData(0).set(downsampled);
+        
+        // Cria novo instrumento
+        const instrId = song.instruments.length;
+        const newInstr = {
+          name: file.name.replace(/\.[^/.]+$/, '').substring(0,16).toUpperCase(),
+          chip: 'SNES SPC700 Sample',
+          wave: 'sample16',
+          sampleBuffer: sample16,
+          sampleRate: targetRate,
+          atk: 1, dec: 10, sus: 80, rel: 30, vol: 0.9,
+          waveTable: Array(64).fill(0.5)
+        };
+        
+        song.instruments.push(newInstr);
+        
+        // Adiciona ao select
+        const opt = document.createElement('option');
+        opt.value = instrId;
+        opt.textContent = `${instrId}: ${newInstr.name} [16-BIT]`;
+        opt.selected = true;
+        instrSel.appendChild(opt);
+        instrSel.value = instrId;
+        song.currentInstrument = instrId;
+        
+        // Atualiza UI
+        chipSel.value = 'SNES SPC700 Sample';
+        document.getElementById('waveType').value = 'custom';
+        
+        sampleInfo.textContent = `${newInstr.name} · ${Math.round(targetRate/1000)}kHz · 16-BIT`;
+        sampleInfo.style.color = '#ff0040';
+        
+        showToast('Amostra 16-bit carregada!');
+        
+        // Patch no playNote para usar sample
+        const originalPlayNote = window.playNote || playNote;
+        window.playNote = function(ch, note, time){
+          const instr = song.instruments[song.patterns[ch][currentPlayStep]? song.currentInstrument : song.currentInstrument];
+          // usa função original mas verifica sample
+          if(instr && instr.sampleBuffer && instr.wave === 'sample16'){
+            const osc = audioCtx.createBufferSource();
+            osc.buffer = instr.sampleBuffer;
+            osc.playbackRate.value = Math.pow(2, (noteToMidi(note)-60)/12);
+            const gain = audioCtx.createGain();
+            gain.gain.value = instr.vol * channelGains[ch].gain.value;
+            osc.connect(gain).connect(masterGain);
+            osc.start(time);
+            osc.stop(time + 2);
+            return;
+          }
+          return originalPlayNote(ch, note, time);
+        };
+        
+      } catch(err){
+        sampleInfo.textContent = 'Erro ao carregar';
+        console.error(err);
+        showToast('Formato não suportado');
+      }
+    };
+  }
+
+  // --- BIBLIOTECA DE SAMPLES 15 CONSOLES ---
+  const sampleLibrary = document.getElementById('sampleLibrary');
+  if(sampleLibrary){
+    const consoles = [
+      {name:'NES', chip:'NES 2A03 Pulse', color:'#ff0040', samples:[
+        {n:'Pulse Lead', f:660, w:'pulse', a:0.01, d:0.1},
+        {n:'Triangle Bass', f:110, w:'triangle', a:0.01, d:0.2},
+        {n:'Noise Snare', f:180, w:'noise', a:0.001, d:0.08},
+        {n:'Coin', f:1200, w:'square', a:0.001, d:0.05},
+        {n:'Jump', f:400, w:'pulse', a:0.001, d:0.15},
+        {n:'Laser', f:800, w:'saw', a:0.001, d:0.12}
+      ]},
+      {name:'Game Boy', chip:'GB DMG Pulse 50%', color:'#8bac0f', samples:[
+        {n:'Pulse 25%', f:440, w:'square', a:0.01, d:0.1},
+        {n:'Wave Bass', f:98, w:'custom', a:0.02, d:0.2},
+        {n:'Noise Hat', f:220, w:'noise', a:0.001, d:0.05},
+        {n:'Periodic Snare', f:180, w:'noise', a:0.001, d:0.08},
+        {n:'Arp Up', f:523, w:'pulse', a:0.005, d:0.08},
+        {n:'Pickup', f:880, w:'square', a:0.001, d:0.07},
+        {n:'Game Over', f:165, w:'triangle', a:0.02, d:0.3}
+      ]},
+      {name:'C64 SID', chip:'C64 SID 6581 Pulse', color:'#306230', samples:[
+        {n:'SID Lead', f:330, w:'pulse', a:0.02, d:0.15},
+        {n:'Filter Bass', f:82, w:'saw', a:0.01, d:0.25},
+        {n:'Noise Crash', f:120, w:'noise', a:0.001, d:0.4},
+        {n:'Arpeggio', f:494, w:'triangle', a:0.005, d:0.1},
+        {n:'Laser Zap', f:700, w:'pulse', a:0.001, d:0.09}
+      ]},
+      {name:'Atari 2600', chip:'Atari TIA', color:'#c4a000', samples:[
+        {n:'TIA Buzz', f:220, w:'square', a:0.001, d:0.05},
+        {n:'Explosion', f:80, w:'noise', a:0.001, d:0.3},
+        {n:'Shot', f:900, w:'pulse', a:0.001, d:0.04},
+        {n:'Engine', f:150, w:'saw', a:0.01, d:0.2}
+      ]},
+      {name:'Atari 800', chip:'Atari POKEY 4bit', color:'#ff8800', samples:[
+        {n:'POKEY Lead', f:440, w:'pulse', a:0.01, d:0.12},
+        {n:'Bass Dist', f:110, w:'saw', a:0.01, d:0.18},
+        {n:'HiHat', f:300, w:'noise', a:0.001, d:0.06}
+      ]},
+      {name:'SNES', chip:'SNES SPC700 Sample', color:'#9b59b6', samples:[
+        {n:'Orch Hit', f:330, w:'saw', a:0.001, d:0.2},
+        {n:'Pad Warm', f:220, w:'sine', a:0.3, d:0.4},
+        {n:'Bass Sub', f:55, w:'triangle', a:0.01, d:0.25},
+        {n:'String', f:440, w:'saw', a:0.15, d:0.3}
+      ]},
+      {name:'Mega Drive', chip:'MD YM2612 FM Ch1', color:'#e74c3c', samples:[
+        {n:'FM Bass', f:82, w:'fm', a:0.01, d:0.2},
+        {n:'Lead Brassy', f:523, w:'fm', a:0.005, d:0.15},
+        {n:'Kick DAC', f:60, w:'sine', a:0.001, d:0.1},
+        {n:'Snare Noise', f:200, w:'noise', a:0.001, d:0.08}
+      ]},
+      {name:'MSX', chip:'AY-3-8910 PSG', color:'#3498db', samples:[
+        {n:'PSG Square', f:440, w:'square', a:0.01, d:0.12},
+        {n:'Bass', f:110, w:'pulse', a:0.01, d:0.2},
+        {n:'Noise Drum', f:150, w:'noise', a:0.001, d:0.07}
+      ]},
+      {name:'ZX Spectrum', chip:'AY-3-8910 PSG', color:'#1abc9c', samples:[
+        {n:'Beep', f:880, w:'square', a:0.001, d:0.05},
+        {n:'Bass', f:98, w:'pulse', a:0.01, d:0.15}
+      ]},
+      {name:'Amiga', chip:'Paula', color:'#f39c12', samples:[
+        {n:'Sample Kick', f:60, w:'sine', a:0.001, d:0.12},
+        {n:'HiHat 8bit', f:300, w:'noise', a:0.001, d:0.05},
+        {n:'Bass', f:80, w:'triangle', a:0.01, d:0.2}
+      ]},
+      {name:'Neo Geo', chip:'YM2610 ADPCM', color:'#d35400', samples:[
+        {n:'ADPCM Kick', f:70, w:'sine', a:0.001, d:0.1},
+        {n:'FM Lead', f:660, w:'fm', a:0.005, d:0.12}
+      ]},
+      {name:'PC Engine', chip:'HuC6280', color:'#2ecc71', samples:[
+        {n:'Wave Lead', f:440, w:'custom', a:0.01, d:0.14},
+        {n:'Bass', f:110, w:'saw', a:0.01, d:0.2}
+      ]},
+      {name:'FDS', chip:'NES FDS Wavetable', color:'#e67e22', samples:[
+        {n:'FDS Bass', f:82, w:'custom', a:0.02, d:0.25},
+        {n:'Lead', f:330, w:'custom', a:0.01, d:0.15}
+      ]},
+      {name:'Atari ST', chip:'YM2149', color:'#95a5a6', samples:[
+        {n:'YM Lead', f:440, w:'square', a:0.01, d:0.1},
+        {n:'Bass', f:98, w:'pulse', a:0.01, d:0.18}
+      ]},
+      {name:'GBA', chip:'GBA Direct Sound A', color:'#34495e', samples:[
+        {n:'GBA Pad', f:220, w:'sine', a:0.2, d:0.3},
+        {n:'Pluck', f:660, w:'triangle', a:0.001, d:0.12}
+      ]}
+    ];
+
+    consoles.forEach(con=>{
+      const box=document.createElement('div');
+      box.style.cssText='background:rgba(0,0,0,.15);border:1px solid #0f380f;border-radius:6px;padding:6px';
+      const title=document.createElement('div');
+      title.innerHTML=`<b style="font-family:'Press Start 2P';font-size:8px;color:${con.color}">${con.name}</b> <span style="opacity:.6;font-size:10px">· ${con.chip}</span>`;
+      box.appendChild(title);
+      const grid=document.createElement('div');
+      grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:4px;margin-top:5px';
+      con.samples.forEach(s=>{
+        const btn=document.createElement('button');
+        btn.textContent=s.n;
+        btn.style.cssText='background:#1b221b;color:#9bbc0f;border:1px solid #306230;border-radius:4px;padding:5px 4px;font-family:VT323;font-size:14px;cursor:pointer;text-align:left';
+        btn.onpointerdown=()=>{ initAudio(); const chipToUse = s.n.includes('Periodic') ? 'GB DMG Noise Periodic' : con.chip; triggerSample(s, chipToUse); showToast(con.name+': '+s.n); };
+        const use=document.createElement('span');
+        use.textContent=' USAR';
+        use.style.cssText='float:right;color:#ff0040;font-size:10px;cursor:pointer;font-family:"Press Start 2P"';
+        use.onclick=(e)=>{ e.stopPropagation(); applySampleToInstrument(s, con); };
+        btn.appendChild(use);
+        grid.appendChild(btn);
+      });
+      box.appendChild(grid);
+      sampleLibrary.appendChild(box);
+    });
+
+    function triggerSample(s, chip){
+      if(!audioCtx) return;
+      const now=audioCtx.currentTime;
+      const osc=audioCtx.createOscillator();
+      const gain=audioCtx.createGain();
+      const filter=audioCtx.createBiquadFilter();
+      
+      // timbre por console
+      if(s.w==='noise'){
+        const buffer=audioCtx.createBuffer(1, audioCtx.sampleRate*0.2, audioCtx.sampleRate);
+        const data=buffer.getChannelData(0);
+        const isPeriodic = instr.noiseMode==='periodic' || chip.includes('Periodic');
+        if(isPeriodic){
+          let lfsr = 0x7F;
+          for(let i=0;i<data.length;i++){
+            data[i]=(lfsr & 1 ? 0.7 : -0.7);
+            const bit = ((lfsr ^ (lfsr >> 1)) & 1);
+            lfsr = (lfsr >> 1) | (bit << 6);
+          }
+        } else {
+          for(let i=0;i<data.length;i++) data[i]=(Math.random()*2-1)*0.7;
+        }
+        const src=audioCtx.createBufferSource();
+        src.buffer=buffer;
+        src.connect(filter).connect(gain).connect(masterGain);
+        gain.gain.setValueAtTime(0.4, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now+s.d);
+        src.start(now);
+        return;
+      }
+      
+      osc.type = s.w==='pulse' ? 'square' : s.w==='fm' ? 'sawtooth' : s.w;
+      osc.frequency.setValueAtTime(s.f, now);
+      if(chip.includes('NES')){ filter.type='lowpass'; filter.frequency.value=1800; }
+      else if(chip.includes('Game Boy')){ filter.frequency.value=1500; }
+      else if(chip.includes('C64')){ filter.type='bandpass'; filter.frequency.value=1200; filter.Q.value=1.5; }
+      else { filter.frequency.value=4000; }
+      
+      osc.connect(filter); filter.connect(gain); gain.connect(masterGain);
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.35, now+s.a);
+      gain.gain.exponentialRampToValueAtTime(0.001, now+s.a+s.d);
+      osc.start(now); osc.stop(now+s.a+s.d+0.05);
+    }
+
+    function applySampleToInstrument(s, con){
+      const ins=song.instruments[song.currentInstrument];
+      const chipToUse = s.n.includes('Periodic') ? 'GB DMG Noise Periodic' : con.chip;
+      ins.chip=chipToUse;
+      ins.wave=s.w;
+      ins.noiseMode = s.noiseMode || 'white';
+      ins.attack=s.a; ins.decay=s.d; ins.sustain=0.6; ins.release=0.15;
+      ins.name=s.n.substring(0,12).toUpperCase();
+      chipSel.value=chipToUse;
+      document.getElementById('waveType').value=s.w;
+      document.getElementById('noiseMode').value = song.instruments[song.currentInstrument].noiseMode || 'white';
+      document.getElementById('noiseModeLabel').style.display = (s.w==='noise' || song.instruments[song.currentInstrument].chip.includes('Noise')) ? 'flex' : 'none';
+      document.getElementById('atk').value=s.a*100;
+      document.getElementById('dec').value=s.d*100;
+      updateInstrUI();
+      showToast('Instrumento atualizado: '+s.n);
+      // muda para aba INSTR
+      document.querySelector('[data-tab="instr"]').click();
+    }
+  }
+
+  
+  // --- EXPORT WAV / 1-BIT ---
+  async function renderSongToBuffer(){
+    const sampleRate = 44100;
+    const stepsPerBeat = 4;
+    const secondsPerStep = 60 / song.bpm / stepsPerBeat;
+    const totalSeconds = song.totalSteps * secondsPerStep + 1;
+    const offline = new OfflineAudioContext(2, Math.ceil(sampleRate * totalSeconds), sampleRate);
+    
+    // recreate simple chain
+    const master = offline.createGain(); master.gain.value = song.master || 0.9;
+    const limiter = offline.createDynamicsCompressor();
+    limiter.threshold.value = -6; limiter.ratio.value = 12; limiter.attack.value = 0.003; limiter.release.value = 0.25;
+    master.connect(limiter); limiter.connect(offline.destination);
+    
+    const chGains = [];
+    for(let i=0;i<5;i++){
+      const g = offline.createGain(); g.gain.value = (song.mute[i]?0:song.mixer[i]/100*0.8);
+      const p = offline.createStereoPanner(); p.pan.value = (song.pan[i]||0)/100;
+      g.connect(p); p.connect(master); chGains.push(g);
+    }
+    
+    function getOsc(instr,freq){
+      const chip=instr.chip||'', wave=instr.wave;
+      if(wave==='noise' || chip.includes('Noise')){
+        const buf=offline.createBuffer(1, offline.sampleRate*0.1, offline.sampleRate);
+        const d=buf.getChannelData(0); for(let i=0;i<d.length;i++) d[i]=Math.random()*2-1;
+        const src=offline.createBufferSource(); src.buffer=buf; src.loop=true; return src;
+      }
+      const osc=offline.createOscillator();
+      let type='square';
+      if(wave==='sine') type='sine'; else if(wave==='saw') type='sawtooth'; else if(wave==='triangle') type='triangle';
+      osc.type=type; osc.frequency.value=freq; return osc;
+    }
+    
+    for(let ch=0; ch<5; ch++){
+      for(let step=0; step<song.totalSteps; step++){
+        const note = song.patterns[ch][step];
+        if(!note) continue;
+        const t = step * secondsPerStep;
+        const midi = noteToMidi(note); const freq = midiToFreq(midi);
+        const instr = song.instruments[ch] || song.instruments[0];
+        const src = getOsc(instr, freq);
+        const g = offline.createGain(); const f = offline.createBiquadFilter();
+        f.type='lowpass'; f.frequency.value=8000;
+        src.connect(f); f.connect(g); g.connect(chGains[ch]);
+        const vol = instr.volume * 0.8;
+        g.gain.setValueAtTime(0, t);
+        g.gain.linearRampToValueAtTime(vol, t+instr.attack);
+        g.gain.linearRampToValueAtTime(vol*instr.sustain, t+instr.attack+instr.decay);
+        g.gain.linearRampToValueAtTime(0.0001, t+instr.attack+instr.decay+instr.release);
+        src.start(t); src.stop(t+instr.attack+instr.decay+instr.release+0.05);
+      }
+    }
+    return await offline.startRendering();
+  }
+  
+  function bufferToWav(buffer){
+    const numCh = buffer.numberOfChannels, sr = buffer.sampleRate, len = buffer.length * numCh * 2 + 44;
+    const ab = new ArrayBuffer(len); const view = new DataView(ab);
+    let p=0;
+    function w4(s){ for(let i=0;i<4;i++) view.setUint8(p++, s.charCodeAt(i)); }
+    function w2(v){ view.setUint16(p, v, true); p+=2; }
+    function w4i(v){ view.setUint32(p, v, true); p+=4; }
+    w4('RIFF'); w4i(len-8); w4('WAVE'); w4('fmt '); w4i(16); w2(1); w2(numCh); w4i(sr); w4i(sr*numCh*2); w2(numCh*2); w2(16);
+    w4('data'); w4i(len-44);
+    for(let i=0;i<buffer.length;i++){
+      for(let ch=0; ch<numCh; ch++){
+        let s = Math.max(-1, Math.min(1, buffer.getChannelData(ch)[i]));
+        view.setInt16(p, s<0 ? s*0x8000 : s*0x7FFF, true); p+=2;
+      }
+    }
+    return new Blob([ab], {type:'audio/wav'});
+  }
+  
+  // 1-bit conversion: simple delta-sigma (muito cru, estilo ZX beeper)
+  function bufferTo1BitWav(buffer){
+    const sr = 44100; const data = buffer.getChannelData(0);
+    const out = new Uint8Array(Math.ceil(data.length/8));
+    let integrator=0;
+    for(let i=0;i<data.length;i++){
+      const sample = data[i];
+      integrator += sample;
+      const bit = integrator >= 0 ? 1 : 0;
+      integrator -= bit ? 1 : -1;
+      const byteIdx = i>>3; const bitIdx = 7-(i&7);
+      out[byteIdx] |= bit<<bitIdx;
+    }
+    // encapsula como WAV 8-bit mono para players reais interpretarem como ruído 1-bit
+    const len = out.length + 44; const ab = new ArrayBuffer(len); const view = new DataView(ab);
+    let p=0; function w4(s){ for(let i=0;i<4;i++) view.setUint8(p++, s.charCodeAt(i)); }
+    function w2(v){ view.setUint16(p, v, true); p+=2; } function w4i(v){ view.setUint32(p, v, true); p+=4; }
+    w4('RIFF'); w4i(len-8); w4('WAVE'); w4('fmt '); w4i(16); w2(1); w2(1); w4i(sr); w4i(sr); w2(1); w2(8);
+    w4('data'); w4i(out.length);
+    for(let i=0;i<out.length;i++) view.setUint8(p++, out[i]);
+    return new Blob([ab], {type:'audio/wav'});
+  }
+  
+  document.getElementById('exportWavBtn').onclick = async ()=>{
+    showToast('Renderizando WAV...');
+    const buf = await renderSongToBuffer();
+    const blob = bufferToWav(buf);
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'chipstudio.wav'; a.click();
+    showToast('WAV pronto!');
+  };
+  document.getElementById('export1BitBtn').onclick = async ()=>{
+    showToast('Renderizando 1-BIT...');
+    const buf = await renderSongToBuffer();
+    const blob = bufferTo1BitWav(buf);
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'chipstudio_1bit.wav'; a.click();
+    showToast('1-BIT pronto!');
+  };
+
+  // demo pattern - PATTERN A (0-31)
+  const demo=['C-4',null,'E-4',null,'G-4',null,'E-4',null,'C-5',null,null,null,'G-4',null,null,null];
+  for(let i=0;i<8;i++) song.patterns[0][i*4]=demo[i]; // só primeira metade
+  for(let i=0;i<64;i+=8) song.patterns[1][i]='C-3';
+  // BATERIA COMPLETA - configura instrumentos por canal
+  song.instruments[0].name='LEAD NES'; song.instruments[0].chip='NES Pulse'; song.instruments[0].wave='pulse'; song.instruments[0].duty=0.5; song.instruments[0].filter=1; song.instruments[0].resonance=0.25;
+  song.instruments[1].name='BASS TRI'; song.instruments[1].chip='NES Triangle'; song.instruments[1].wave='triangle'; song.instruments[1].volume=0.85;
+  song.instruments[2].name='KICK 808'; song.instruments[2].chip='NES Triangle'; song.instruments[2].wave='sine'; song.instruments[2].attack=0.001; song.instruments[2].decay=0.15; song.instruments[2].sustain=0; song.instruments[2].release=0.05; song.instruments[2].volume=0.95;
+  song.instruments[3].name='DRUMS NOISE'; song.instruments[3].chip='NES Noise'; song.instruments[3].wave='noise'; song.instruments[3].attack=0.001; song.instruments[3].decay=0.09; song.instruments[3].sustain=0; song.instruments[3].release=0.05; song.instruments[3].volume=0.8;
+  song.instruments[4].name='PAD C64'; song.instruments[4].chip='C64 SID 6581'; song.instruments[4].wave='saw'; song.instruments[4].attack=0.28; song.instruments[4].decay=0.65; song.instruments[4].sustain=0.72; song.instruments[4].release=0.85; song.instruments[4].volume=0.48; song.instruments[4].filter=1; song.instruments[4].cutoff=1100; song.instruments[4].resonance=0.3;
+  // canal 2 = kick
+  for(let i=0;i<96;i+=8){ song.patterns[2][i]='C-2'; song.patterns[2][i+4]='C-2'; }
+  // fill de virada - tira kick do 28, 60 e 92, coloca tom-tom descendente
+  [28,60,92].forEach(s=>{
+    song.patterns[2][s]=null;
+    song.patterns[2][s]='C-3';
+    song.patterns[2][s+1]='A-2';
+    song.patterns[2][s+2]='F-2';
+    song.patterns[2][s+3]='C-2';
+  });
+  // canal 1 = BAIXO ANDANDO
+  song.patterns[1].fill(null);
+  const bassWalkA = [[0,'C2'],[4,'E2'],[8,'G2'],[12,'B1'],[16,'C2'],[20,'D2'],[24,'E2'],[28,'G2']];
+  const bassWalkB = [[32,'F2'],[36,'A2'],[40,'C3'],[44,'E2'],[48,'F2'],[52,'G2'],[56,'A2'],[60,'C3']];
+  const bassWalkC = [[64,'A1'],[68,'C2'],[72,'E2'],[76,'G2'],[80,'A2'],[84,'B2'],[88,'C3'],[92,'E2']]; // PATTERN C em Am
+  [...bassWalkA, ...bassWalkB, ...bassWalkC].forEach(([step,note])=> song.patterns[1][step]=note.replace('1','-1').replace('2','-2').replace('3','-3'));
+  // canal 3 = DRUMS (snare + hat combinados)
+  song.patterns[3].fill(null);
+  // snare - mais espaçado na ponte
+  [4,12,20,36,44,52,68,76,84].forEach(s=> song.patterns[3][s]='C-4');
+  [31,63,95].forEach(s=> song.patterns[3][s]='C-4');
+  // hat fechado
+  for(let i=0;i<96;i+=2){ if(!song.patterns[3][i]) song.patterns[3][i]='F#5'; }
+  // hat aberto - tira alguns na ponte para dar ar
+  [30,62,78,94].forEach(s=>{ song.patterns[3][s]='A#5'; if(s+2<96) song.patterns[3][s+2]=null; });
+  // remove hats na ponte para contraste
+  [66,70,74,82,86,90].forEach(s=> song.patterns[3][s]=null);
+  // GHOST NOTES FUNK - caixa fantasma 16ths
+  [3,7,11,15,19,22,27,35,39,43,47,50,55,59,67,71,75,79,83,87,90,91].forEach(s=>{ if(![4,12,20,36,44,52,68,76,84].includes(s)) song.patterns[3][s]='C-4'; });
+  // canal 0 = LEAD - Pattern A, B e C
+  song.patterns[0].fill(null);
+  const leadA = [[0,'C-4'],[8,'E-4'],[16,'G-4'],[24,'E-4']];
+  const leadB = [[32,'F-4'],[40,'A-4'],[48,'C-5'],[56,'A-4'],[60,'F-4']];
+  const leadC = [[64,'A-4'],[72,'C-5'],[80,'E-5'],[88,'C-5'],[92,'A-4']]; // PATTERN C em Am - melancólico
+  [...leadA, ...leadB, ...leadC].forEach(([s,n])=> song.patterns[0][s]=n);
+  // canal 4 = SEGUNDA MELODIA
+  song.patterns[4].fill(null);
+  const harmonyA = [[4,'E-4'],[12,'G-4'],[20,'B-4'],[28,'G-4']];
+  const harmonyB = [[36,'A-4'],[44,'C-5'],[52,'E-5'],[60,'C-5']];
+  const harmonyC = [[68,'C-5'],[76,'E-5'],[84,'G-5'],[92,'E-5']]; // terças menores
+  [...harmonyA, ...harmonyB, ...harmonyC].forEach(([s,n])=> song.patterns[4][s]=n);
+  // muda timbre na ponte para contraste
+  song.instruments[0].chip='NES Pulse'; // volta no A/B
+  // vamos trocar chip no meio via evento - simplificado: deixa GB na ponte via nota especial
+  renderGrid();
+  renderGrid();
+});
+</script>
+</body>
+</html>
